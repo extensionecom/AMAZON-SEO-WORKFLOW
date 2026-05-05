@@ -1,107 +1,55 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-const PROHIBITED_SCAN_INSTRUCTION = `
-GLOBAL PROHIBITED WORDS — fix silently before presenting, never flag to user:
-Substring matches (any word containing): night, use, best, free, care, evening, fast, reduce, certified, tested, quick, ease, adult, pill, cuffs, better, new
-Health claims: pain relief, pain treatment, stress relief, anxiety, immune support, immunity, sleep aid, mood booster, calm, soothing, reliever, boost, improve, enhance, strengthen, optimize, slim, weight loss, therapy, treatment, healing, cure, remedy
+const PROHIBITED = `PROHIBITED WORDS — fix silently, never flag:
+Substring matches: night, use, best, free, care, evening, fast, reduce, certified, tested, quick, ease, adult, pill, cuffs, better, new
+Health: pain relief, stress relief, anxiety, immune support, sleep aid, mood booster, calm, soothing, boost, improve, enhance, strengthen, optimize, slim, weight loss, therapy, treatment, healing, cure, remedy
 Medical: medicine, medication, drug, therapeutic, testosterone, hormone, glucose, blood sugar, cholesterol
-Disease: FDA, COVID, cancer, diabetes, HIV, AIDS, disease, infection
-Exaggerated: top-rated, world's #1, 100% effective, instant results, miraculous, revolutionary, breakthrough, ultimate, strongest, most powerful, guaranteed results, never fails, award-winning, perfect
-Pricing/comparison: % less, % cheaper, % off, less than, cheaper than, compared to, better value, saves you, lower cost, half the price
-Promotional: discount, sale, cheap, limited time, urgent, act now, hurry, wholesale, liquidation, clearance
-Guarantee: guarantee, proven, recommended by, clinically proven, doctor recommended, FDA approved, buy with confidence, best selling
-Formatting: em dashes, emojis, copyright, star symbols, HTML tags
-`.trim();
+Disease: FDA, COVID, cancer, diabetes, HIV, disease, infection
+Exaggerated: top-rated, world's #1, 100% effective, miraculous, revolutionary, breakthrough, ultimate, strongest, most powerful, guaranteed results, award-winning, perfect
+Pricing: % less, % cheaper, % off, less than, cheaper than, compared to, better value, saves you, lower cost
+Promotional: discount, sale, cheap, limited time, urgent, act now, hurry
+Guarantee: guarantee, proven, recommended by, clinically proven, doctor recommended, FDA approved
+Formatting: em dashes, emojis, HTML tags`;
 
 const PROMPTS = {
-  review_analysis: (data) => ({
-    system: `You are an Amazon listing optimization specialist. Analyze reviews to extract structured buyer insights. Output clean structured text using ALLCAPS section labels, no markdown.`,
-    user: `Analyze these reviews for the product below.
+  review_analysis: (d) => `You are an Amazon listing specialist. Analyze reviews and output structured buyer insights using ALLCAPS labels, no markdown.
 
-REVIEW SOURCE: ${data.reviewSource === 'own' ? "OWN PRODUCT reviews — use directly for USPs and customer language" : "COMPETITOR reviews — use only for buyer priorities and language patterns. All claims must come from actual product info only."}
+REVIEW SOURCE: ${d.reviewSource === 'own' ? 'OWN PRODUCT' : 'COMPETITOR — use only for language patterns, not claims'}
+PRODUCT INFO: ${d.productInfo}
+REVIEWS: ${d.reviews}
 
-PRODUCT INFO:
-${data.productInfo}
+Output exactly:
+${d.reviewSource === 'competitor' ? 'Note: Competitor reviews. All claims from product info only.\n\n' : ''}WHY PEOPLE BUY THIS PRODUCT (frequency order)
+• [reason 1-5]
 
-REVIEWS:
-${data.reviews}
-
-Output this exact structure:
-
-${data.reviewSource === 'competitor' ? 'Note: Competitor reviews. All claims will come from the actual product info only.\n\n' : ''}WHY PEOPLE BUY THIS PRODUCT (frequency order)
-• [reason 1]
-• [reason 2]
-• [reason 3]
-• [reason 4]
-• [reason 5]
-
-WHY PEOPLE ARE DISSATISFIED (frequency order)
-• [complaint 1]
-• [complaint 2]
-• [complaint 3]
+WHY PEOPLE ARE DISSATISFIED
+• [complaint 1-3]
 
 TOP 3 BENEFITS / DIFFERENTIATORS
-1. [benefit]
-2. [benefit]
-3. [benefit]
+1-3. [benefit]
 
 TOP 3 PAIN POINTS / OBJECTIONS
-1. [pain point]
-2. [pain point]
-3. [pain point]
+1-3. [pain point]
 
-CUSTOMER LANGUAGE — 8-10 exact phrases from reviews
-• "[phrase 1]"
-• "[phrase 2]"
-• "[phrase 3]"
-• "[phrase 4]"
-• "[phrase 5]"
-• "[phrase 6]"
-• "[phrase 7]"
-• "[phrase 8]"`
-  }),
+CUSTOMER LANGUAGE — 8-10 exact phrases
+• "[phrase]"`,
 
-  usp: (data) => ({
-    system: `You are an Amazon listing optimization specialist. Identify USPs grounded only in the product info provided. ${PROHIBITED_SCAN_INSTRUCTION}`,
-    user: `Identify 5 USPs that will anchor each bullet point.
+  usp: (d) => `Amazon listing specialist. Identify 5 USPs from product info only. ${PROHIBITED}
 
-PRODUCT INFO:
-${data.productInfo}
+PRODUCT INFO: ${d.productInfo}
+REVIEW ANALYSIS: ${d.reviewAnalysis}
 
-REVIEW ANALYSIS:
-${data.reviewAnalysis}
+Rules: grounded in product info only, no invented claims, product is subject not buyer, no prohibited words.
 
-Rules:
-- Every USP must be grounded in the product info — no invented claims
-- No guarantee or warranty language
-- No pricing or comparison claims
-- Product is the subject — not the buyer
-- No prohibited words
+USP 1: [top buying reason grounded in product info]
+USP 2: [second buying reason]
+USP 3: [third buying reason]
+USP 4: [key specification]
+USP 5: [second specification or trust signal]
+VALIDATION: All checked — grounded in product info, no prohibited words.`,
 
-Output:
+  keywords: (d) => `Amazon SEO analyst. Sort keywords by search volume, identify coverage gaps.
 
-USP 1: [Top buying reason from reviews, grounded in product info]
-USP 2: [Second buying reason]
-USP 3: [Third buying reason]
-USP 4: [Key specification from product info]
-USP 5: [Second specification or trust signal]
-
-VALIDATION: All 5 USPs checked — grounded in product info, no prohibited words, no invented claims.`
-  }),
-
-  keywords: (data) => ({
-    system: `You are an Amazon SEO keyword analyst.`,
-    user: `Sort this keyword list by search volume (highest to lowest). Then identify which keywords appear in the existing bullet points and which do not.
-
-KEYWORDS WITH SEARCH VOLUMES:
-${data.keywords}
-
-EXISTING BULLET POINTS:
-${data.existingBullets}
-
-Output:
+KEYWORDS: ${d.keywords}
+EXISTING BULLETS: ${d.existingBullets}
 
 KEYWORDS SORTED BY SEARCH VOLUME:
 [keyword] | [SV]
@@ -113,38 +61,18 @@ NOT YET COVERED (targets):
 [keyword] | [SV]
 
 SUMMARY:
-Covered: X unique keywords | X,XXX total SV
-Targets: X unique keywords | X,XXX total SV`
-  }),
+Covered: X unique | X,XXX SV
+Targets: X unique | X,XXX SV`,
 
-  bullets: (data) => ({
-    system: `You are an Amazon listing copywriter. ${PROHIBITED_SCAN_INSTRUCTION}
+  bullets: (d) => `Amazon copywriter. Write 5 bullets. ${PROHIBITED}
 
-BULLET RULES:
-- Bullets 1-3: Conversion bullets anchored to USPs 1-3
-- Bullets 4-5: Spec bullets anchored to USPs 4-5
-- Format: ALL CAPS HEADER: Supporting sentence.
-- 300-350 characters per bullet INCLUDING header
-- Product is always the subject — never the buyer
-- No em dashes, no emojis, no prohibited words`,
-    user: `Write 5 Amazon bullet points.
+Rules: Bullets 1-3 conversion (USPs 1-3), 4-5 spec (USPs 4-5). Format: ALL CAPS HEADER: Sentence. 300-350 chars each including header. Product is subject, never buyer. No em dashes.
 
-PRODUCT INFO:
-${data.productInfo}
-
-CONFIRMED USPs:
-${data.usps}
-
-CUSTOMER LANGUAGE:
-${data.customerLanguage}
-
-KEYWORD TARGETS (integrate naturally):
-${data.keywordTargets}
-
-OLD LISTING BULLETS (to beat on keyword coverage):
-${data.existingBullets}
-
-Output each bullet then its character count:
+PRODUCT INFO: ${d.productInfo}
+USPs: ${d.usps}
+CUSTOMER LANGUAGE: ${d.customerLanguage}
+KEYWORD TARGETS: ${d.keywordTargets}
+OLD BULLETS: ${d.existingBullets}
 
 BULLET 1: [text] | [X chars]
 BULLET 2: [text] | [X chars]
@@ -153,103 +81,76 @@ BULLET 4: [text] | [X chars]
 BULLET 5: [text] | [X chars]
 
 KEYWORD SCORECARD:
-Old listing: X unique keywords covered
-New listing: X unique keywords covered
-Improvement: +X`
-  }),
+Old listing: X keywords
+New listing: X keywords
+Improvement: +X`,
 
-  description: (data) => ({
-    system: `You are an Amazon listing copywriter. ${PROHIBITED_SCAN_INSTRUCTION}`,
-    user: `Write a product description.
+  description: (d) => `Amazon copywriter. ${PROHIBITED}
 
-PRODUCT INFO:
-${data.productInfo}
+Write a 1000-1500 char product description. One paragraph, no line breaks, no bullets. Rephrase bullets, don't repeat verbatim. No em dashes.
 
-FINALIZED BULLETS:
-${data.bullets}
+PRODUCT INFO: ${d.productInfo}
+BULLETS: ${d.bullets}
+CUSTOMER LANGUAGE: ${d.customerLanguage}
+REMAINING KEYWORDS: ${d.remainingKeywords}
 
-CUSTOMER LANGUAGE:
-${data.customerLanguage}
-
-REMAINING KEYWORDS TO INTEGRATE:
-${data.remainingKeywords}
-
-Rules:
-- 1,000-1,500 characters including spaces
-- One paragraph only — no line breaks, no bullets, no headers
-- Do not repeat bullets verbatim
-- No em dashes, no prohibited words
-
-After the description, write RUFUS Q&A:
-
+After description, write RUFUS Q&A:
 Q1: [question]
-A: [answer]
-
-Q2: [question]
-A: [answer]
-
-Q3: [question]
-A: [answer]
-
-Q4: [question]
-A: [answer]
-
-Q5: [question]
-A: [answer]
+A: [answer from product info]
+(repeat Q2-Q5)
 
 DESCRIPTION: [X chars]
-KEYWORD SCORECARD:
-Old: X keywords | New: X keywords | +X improvement`
-  }),
+KEYWORD SCORECARD: Old: X | New: X | +X improvement`,
 
-  title: (data) => ({
-    system: `You are an Amazon listing copywriter specializing in titles. ${PROHIBITED_SCAN_INSTRUCTION}`,
-    user: `Write an Amazon product title.
+  title: (d) => `Amazon title specialist. ${PROHIBITED}
 
-PRODUCT INFO:
-${data.productInfo}
+Write a 190-200 char title. Format: Brand + Primary Keyword + Key Feature + Secondary Keywords + Size/Variant. Title Case. No ALL CAPS, no symbols, no word repeated more than twice.
 
-BRAND: ${data.brand}
+PRODUCT INFO: ${d.productInfo}
+BRAND: ${d.brand}
+TOP KEYWORDS: ${d.topKeywords}
 
-TOP KEYWORDS BY SEARCH VOLUME:
-${data.topKeywords}
+TITLE: [title]
+CHARACTER COUNT: [number] — [PASS/FAIL]
+WORD REPETITION: [issues or NONE]
 
-Rules:
-- 190-200 characters EXACTLY (count every character including spaces)
-- Format: Brand + Primary Keyword + Key Feature + Secondary Keywords + Size/Variant
-- Title Case
-- No ALL CAPS, no promotional language, no symbols
-- No word appears more than twice
-
-Output:
-TITLE: [the title]
-CHARACTER COUNT: [exact number] — [PASS if 190-200, FAIL otherwise]
-WORD REPETITION: [any word 3+ times, or NONE]
-
-Revise until both checks pass before presenting.`
-  }),
+Revise until 190-200 chars and no word over 2x.`,
 };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-
   const { step, data } = req.body;
   if (!PROMPTS[step]) return res.status(400).json({ error: 'Unknown step' });
 
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not set' });
+
+  const prompt = PROMPTS[step](data);
+
   try {
-    const prompt = PROMPTS[step](data);
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 2000, temperature: 0.7 },
+        }),
+      }
+    );
 
-    const geminiModel = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      systemInstruction: prompt.system,
-    });
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('Gemini error:', err);
+      return res.status(500).json({ error: `Gemini API error: ${response.status}` });
+    }
 
-    const result = await geminiModel.generateContent(prompt.user);
-    const text = result.response.text();
-
+    const json = await response.json();
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
     res.status(200).json({ result: text });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message || 'API error' });
+    res.status(500).json({ error: err.message });
   }
 }
